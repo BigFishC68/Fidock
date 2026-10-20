@@ -1,0 +1,21 @@
+# 构建产物
+bin/
+obj/
+publish/
+
+# 本地发布目录（dotnet publish 生成，可用 README 里的命令重新生成）
+# exe 约 126MB，超过 GitHub 单文件 100MB 上限，不进版本库
+Fidock_v1.0/
+MyDock_v1.0/
+.workbuddy/
+
+# IDE / 用户级文件
+.vs/
+*.user
+*.suo
+*.ReSharper/
+.idea/
+
+# 系统文件
+Thumbs.db
+desktop.ini

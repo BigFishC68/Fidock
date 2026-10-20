@@ -1,0 +1,10 @@
+﻿<Application x:Class="MyDock.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:MyDock">
+    <!-- 不用 StartupUri：主窗口在 App.OnStartup 中显式创建（
+         XAML 位于 src/ 子目录时，StartupUri 的相对路径会解析失败） -->
+    <Application.Resources>
+
+    </Application.Resources>
+</Application>
