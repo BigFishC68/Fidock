@@ -2,6 +2,11 @@
 
 仿 macOS 风格的 Windows 桌面 Dock（WPF / .NET 10）。左键管窗口、右键管程序，支持拖拽排序、文件夹上拉面板、运行状态小圆点、多窗口选择面板、开机自启。
 
+仓库：<https://github.com/BigFishC68/Fidock>（`git clone https://github.com/BigFishC68/Fidock.git`）
+
+> 版本库里**不含发布产物**：单文件 exe 约 126 MB，超过 GitHub 单文件 100 MB 上限。
+> 需要可执行文件时按下面的命令自行生成（输出目录 `MyDock_v1.0\`）。
+
 ## 目录结构
 
 ```
@@ -24,7 +29,7 @@ MyDock/
 │  ├─ Fidock.ico                    程序图标（16/24/32/48/64/128/256 多尺寸，构建用）
 │  └─ source/                       图标源文件（256 PNG 版 ico + PSD）
 ├─ docs/进度汇总.md                  功能演进与逐轮 Bug 修复记录
-└─ MyDock_v1.0/                     发布产物（单文件 MyDock.exe，开箱即用）
+└─ MyDock_v1.0/                     dotnet publish 的输出（exe 约 126 MB，不入版本库）
 ```
 
 ## 环境要求
