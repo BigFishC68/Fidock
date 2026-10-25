@@ -29,9 +29,6 @@ public partial class BatchRemoveWindow : Window
     {
         InitializeComponent();
 
-        // 与主程序保持一致：深色标题栏
-        DwmBlur.EnableDarkTitleBar(this);
-
         foreach (var a in apps)
             _entries.Add(new BatchEntry { App = a, List = apps, Group = "Dock" });
         foreach (var a in folderApps)
@@ -53,6 +50,13 @@ public partial class BatchRemoveWindow : Window
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => Close();
+
+    // 无边框窗口：按住自绘标题栏拖动（只在标题栏区域，避免与列表交互冲突）
+    private void HeaderBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ButtonState != MouseButtonState.Pressed) return;
+        try { DragMove(); } catch { }
+    }
 
     private void Window_KeyDown(object sender, KeyEventArgs e)
     {

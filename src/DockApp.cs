@@ -29,6 +29,12 @@ public sealed class DockApp : INotifyPropertyChanged
     /// <summary>源程序目录（不持久化）。启动器型快捷方式（WPS/QQ）靠它做运行状态兜底匹配。</summary>
     [JsonIgnore] public string? RunningDir { get; set; }
 
+    /// <summary>
+    /// 快速访问项（路径是文件夹，不持久化，加载时按 Path 是否为目录推导）。
+    /// 点击时直接用资源管理器打开该目录，不参与进程运行检测。
+    /// </summary>
+    [JsonIgnore] public bool IsQuickAccess { get; set; }
+
     private bool _isDragging;
 
     /// <summary>是否正在被拖拽（用于半透明反馈）。</summary>

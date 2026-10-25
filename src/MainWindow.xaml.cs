@@ -199,6 +199,16 @@ public partial class MainWindow : Window
         if (app.IsFolder) { app.IconImage = GetStockIcon(SIID_FOLDER); app.RunningKey = null; return; }
         if (app.IsRecycleBin) { app.IconImage = GetStockIcon(SIID_RECYCLER); app.RunningKey = null; return; }
 
+        // 快速访问：路径本身是目录 → 用系统文件夹图标，不做进程检测
+        if (!app.IsFixed && Directory.Exists(app.Path))
+        {
+            app.IsQuickAccess = true;
+            app.IconImage = GetShellIcon(app.Path) ?? GetStockIcon(SIID_FOLDER);
+            app.RunningKey = null;
+            app.RunningDir = null;
+            return;
+        }
+
         // .lnk 只解析一次，图标与运行检测共用结果（避免重复创建 COM 对象拖慢启动）
         bool isLnk = app.Path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase);
         string target = app.Path;
@@ -374,8 +384,6 @@ public partial class MainWindow : Window
     {
         public List<DockApp>? Apps { get; set; }
         public List<DockApp>? FolderApps { get; set; }
-        /// <summary>图标边长（DIP）。缺省 32，兼容没有这个字段的旧配置。</summary>
-        public int? IconSize { get; set; }
     }
 
     private void LoadApps()
@@ -390,8 +398,6 @@ public partial class MainWindow : Window
                 if (cfg != null)
                 {
                     loaded = true;
-                    // 图标大小先于布局生效，避免先按默认尺寸排一遍再跳
-                    if (cfg.IconSize is int iconSize) DockMetrics.Current.IconSize = iconSize;
                     // 加载时跨两栏去重，兼容历史配置里可能存在的重复项
                     var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     foreach (var a in cfg.Apps ?? new List<DockApp>())
@@ -449,8 +455,7 @@ public partial class MainWindow : Window
             var cfg = new DockConfig
             {
                 Apps = Apps.ToList(),
-                FolderApps = FolderApps.ToList(),
-                IconSize = (int)Math.Round(DockMetrics.Current.IconSize)
+                FolderApps = FolderApps.ToList()
             };
             File.WriteAllText(ConfigFile,
                 JsonSerializer.Serialize(cfg, new JsonSerializerOptions { WriteIndented = true }));
@@ -465,7 +470,12 @@ public partial class MainWindow : Window
             return null;
 
         string name = Path.GetFileNameWithoutExtension(path);
-        if (path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
+        if (Directory.Exists(path))
+        {
+            // 文件夹：GetFileNameWithoutExtension 会把 "my.app" 这类名字的尾部当扩展名切掉
+            name = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        }
+        else if (path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
         {
             var t = ResolveLnkTarget(path);
             if (!string.IsNullOrWhiteSpace(t))
@@ -553,6 +563,13 @@ public partial class MainWindow : Window
             {
                 // 回收站等 shell CLSID
                 Process.Start("explorer.exe", app.Path);
+                return;
+            }
+
+            // 快速访问：交给资源管理器打开目录（已有窗口复用），不需要"启动中"灰显
+            if (app.IsQuickAccess)
+            {
+                Process.Start("explorer.exe", $"\"{app.Path}\"");
                 return;
             }
 
@@ -801,6 +818,13 @@ public partial class MainWindow : Window
         if (app.IsRecycleBin) // 回收站：直接打开
         {
             LaunchApp(app);
+            return;
+        }
+
+        if (app.IsQuickAccess) // 快速访问：打开目录，不参与窗口/最小化那套逻辑
+        {
+            LaunchApp(app);
+            if (FolderPopup.IsOpen && FolderApps.Contains(app)) FolderPopup.IsOpen = false;
             return;
         }
 
@@ -1413,7 +1437,7 @@ public partial class MainWindow : Window
         {
             bool any = false;
             foreach (var f in files)
-                if (IsExecutable(f) && AddAppByPath(f)) any = true;
+                if ((IsExecutable(f) || Directory.Exists(f)) && AddAppByPath(f)) any = true;
             if (any) SaveApps();
             e.Handled = true;
         }
@@ -1453,6 +1477,13 @@ public partial class MainWindow : Window
     // ---------- 文件到软件 / 回收站 的操作 ----------
     private void HandleFilesOnApp(DockApp owner, string[] files)
     {
+        // 文件夹快捷方式没有"用它打开文件"的语义，拖文件上去就当作打开该目录
+        if (owner.IsQuickAccess)
+        {
+            LaunchApp(owner);
+            return;
+        }
+
         foreach (var f in files)
         {
             if (owner.IsRecycleBin) MoveToRecycleBin(f);
@@ -1580,6 +1611,13 @@ public partial class MainWindow : Window
     private void OpenLocation_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { DataContext: DockApp app }) return;
+
+        // 快速访问：在父目录里选中这个文件夹
+        if (app.IsQuickAccess)
+        {
+            try { Process.Start("explorer.exe", $"/select,\"{app.Path}\""); } catch { }
+            return;
+        }
 
         // 定位到源程序目录：快捷方式被删除也能正确定位
         string target = EffectiveTarget(app);
@@ -1827,6 +1865,23 @@ public partial class MainWindow : Window
         RefreshRunningSoon();
     }
 
+    /// <summary>添加快速访问：把一个文件夹放到 Dock 上，点击直接打开该目录。</summary>
+    private void AddQuickAccess_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFolderDialog
+        {
+            Title = "选择要加入 Dock 的文件夹",
+            Multiselect = true
+        };
+        if (dlg.ShowDialog(this) != true) return;
+
+        bool added = false;
+        foreach (var dir in dlg.FolderNames) added |= AddAppByPath(dir);
+        if (!added) return;
+
+        SaveApps();
+    }
+
     private void OpenConfigFolder_Click(object sender, RoutedEventArgs e)
     {
         try
@@ -1835,33 +1890,6 @@ public partial class MainWindow : Window
             Process.Start(new ProcessStartInfo { FileName = _configDirectory, UseShellExecute = true });
         }
         catch { }
-    }
-
-    // ---------- 图标大小 ----------
-    /// <summary>应用图标尺寸：写配置 + 重新居中（栏宽变了，位置要重算）。</summary>
-    public void ApplyIconSize(double size)
-    {
-        DockMetrics.Current.IconSize = size;
-        SaveApps();
-        ScheduleRecenter();
-        SyncIconSizeMenu();
-    }
-
-    private void IconSize_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is MenuItem { Tag: string tag } && double.TryParse(tag, out double size))
-            ApplyIconSize(size);
-    }
-
-    private void DockArea_ContextMenuOpening(object sender, ContextMenuEventArgs e) => SyncIconSizeMenu();
-
-    /// <summary>三个档位是互斥勾选，打开菜单时按当前值刷新。</summary>
-    private void SyncIconSizeMenu()
-    {
-        double cur = DockMetrics.Current.IconSize;
-        IconSizeSmall.IsChecked = Math.Abs(cur - 32) < 0.5;
-        IconSizeMid.IsChecked = Math.Abs(cur - 40) < 0.5;
-        IconSizeLarge.IsChecked = Math.Abs(cur - 48) < 0.5;
     }
 
     private void BatchRemove_Click(object sender, RoutedEventArgs e)

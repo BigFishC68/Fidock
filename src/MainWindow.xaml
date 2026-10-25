@@ -131,8 +131,8 @@
         </ContextMenu>
 
         <Style x:Key="DockIcon" TargetType="Button">
-            <Setter Property="Width" Value="{Binding Source={x:Static local:DockMetrics.Current}, Path=ButtonSize}"/>
-            <Setter Property="Height" Value="{Binding Source={x:Static local:DockMetrics.Current}, Path=ButtonSize}"/>
+            <Setter Property="Width" Value="40"/>
+            <Setter Property="Height" Value="40"/>
             <Setter Property="Margin" Value="3,0"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
@@ -263,11 +263,9 @@
                     PreviewMouseUp="Icon_PreviewMouseUp"
                     DragOver="Icon_DragOver"
                     Drop="Icon_Drop">
-                <Grid Width="{Binding Source={x:Static local:DockMetrics.Current}, Path=IconSize}"
-                      Height="{Binding Source={x:Static local:DockMetrics.Current}, Path=IconSize}">
+                <Grid Width="32" Height="32">
                     <Image Source="{Binding IconImage}"
-                           Width="{Binding Source={x:Static local:DockMetrics.Current}, Path=IconSize}"
-                           Height="{Binding Source={x:Static local:DockMetrics.Current}, Path=IconSize}"
+                           Width="32" Height="32"
                            Stretch="Uniform"
                            RenderOptions.BitmapScalingMode="HighQuality"/>
 
@@ -299,7 +297,6 @@
                 CornerRadius="16"
                 Padding="10,6"
                 AllowDrop="True"
-                ContextMenuOpening="DockArea_ContextMenuOpening"
                 DragOver="DockArea_DragOver"
                 Drop="DockArea_Drop">
             <Border.ContextMenu>
@@ -315,15 +312,8 @@
                               Unchecked="AutoStart_Changed"/>
                     <Separator/>
                     <MenuItem Header="添加程序…" Click="AddApps_Click"/>
+                    <MenuItem Header="添加快速访问…" Click="AddQuickAccess_Click"/>
                     <MenuItem Header="批量移除" Click="BatchRemove_Click"/>
-                    <MenuItem Header="图标大小">
-                        <MenuItem x:Name="IconSizeSmall" Header="标准（32）" IsCheckable="True"
-                                  Tag="32" Click="IconSize_Click"/>
-                        <MenuItem x:Name="IconSizeMid" Header="较大（40）" IsCheckable="True"
-                                  Tag="40" Click="IconSize_Click"/>
-                        <MenuItem x:Name="IconSizeLarge" Header="特大（48）" IsCheckable="True"
-                                  Tag="48" Click="IconSize_Click"/>
-                    </MenuItem>
                     <MenuItem Header="打开配置文件夹" Click="OpenConfigFolder_Click"/>
                     <Separator/>
                     <MenuItem Header="退出" Click="Close_Click"/>
@@ -337,8 +327,7 @@
                 <ContentControl x:Name="FolderButtonHost"
                                 Content="{Binding FolderApp}"
                                 ContentTemplate="{StaticResource DockItemTemplate}"/>
-                <Rectangle x:Name="FolderSep" Width="1" Margin="6,0"
-                           Height="{Binding Source={x:Static local:DockMetrics.Current}, Path=SeparatorHeight}"/>
+                <Rectangle x:Name="FolderSep" Width="1" Height="26" Margin="6,0"/>
                 <ItemsControl x:Name="AppItems"
                               ItemsSource="{Binding Apps}"
                               ItemTemplate="{StaticResource DockItemTemplate}">
@@ -348,8 +337,7 @@
                         </ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
                 </ItemsControl>
-                <Rectangle x:Name="RecycleSep" Width="1" Margin="6,0"
-                           Height="{Binding Source={x:Static local:DockMetrics.Current}, Path=SeparatorHeight}"/>
+                <Rectangle x:Name="RecycleSep" Width="1" Height="26" Margin="6,0"/>
                 <!-- 运行中的文件夹项：临时显示在回收站左侧，关闭后回到文件夹面板 -->
                 <ItemsControl x:Name="RunningFolderItems"
                               ItemsSource="{Binding RunningFolderView}"

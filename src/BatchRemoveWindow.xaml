@@ -3,14 +3,16 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="批量移除"
         SizeToContent="WidthAndHeight"
-        WindowStyle="ToolWindow"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
-        Background="#F21F1F1F"
-        Foreground="#E6FFFFFF"
-        BorderBrush="#40FFFFFF"
         FontSize="13"
+        Foreground="#E6FFFFFF"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
         KeyDown="Window_KeyDown">
 
     <Window.Resources>
@@ -34,6 +36,35 @@
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter Property="Background" Value="#1FFFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 标题栏右上角关闭键：无边框窗口自带不了系统叉号，这里自绘（悬浮转红） -->
+        <Style x:Key="TitleCloseButton" TargetType="Button">
+            <Setter Property="Width" Value="30"/>
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#B3FFFFFF"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6">
+                            <TextBlock Text="&#x2715;" FontSize="11"
+                                       Foreground="{TemplateBinding Foreground}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#E81123"/>
+                                <Setter Property="Foreground" Value="#FFFFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#C50F1F"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -95,41 +126,105 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- 细窄深色滚动条：默认模板是浅色系统样式，在深底上很跳 -->
+        <Style TargetType="ScrollBar">
+            <Setter Property="Width" Value="8"/>
+            <Setter Property="Margin" Value="2,0,0,0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Grid Background="Transparent">
+                            <Track x:Name="PART_Track" IsDirectionReversed="True">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0"
+                                                  Focusable="False"/>
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb MinHeight="28">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Border x:Name="ThumbBd" Background="#40FFFFFF"
+                                                        CornerRadius="3"/>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="ThumbBd" Property="Background"
+                                                                Value="#73FFFFFF"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsDragging" Value="True">
+                                                        <Setter TargetName="ThumbBd" Property="Background"
+                                                                Value="#99FFFFFF"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0"
+                                                  Focusable="False"/>
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
-    <StackPanel Margin="16">
-        <TextBlock Text="勾选要移除的图标（Dock 与文件夹均可）"
-                   Foreground="#B3FFFFFF" FontSize="12" Margin="0,0,0,10"/>
+    <!-- 外层留 14px 给投影，真正的面板才是可见边界 -->
+    <Border Margin="14" CornerRadius="12"
+            Background="#F21F1F1F"
+            BorderBrush="#40FFFFFF" BorderThickness="1">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="18" ShadowDepth="0" Opacity="0.55" Color="#000000"/>
+        </Border.Effect>
 
-        <Border Background="#14FFFFFF" BorderBrush="#33FFFFFF" BorderThickness="1" CornerRadius="10">
-            <ListBox x:Name="ItemList"
-                     MinWidth="320" MaxHeight="340"
-                     Margin="4"
-                     Background="Transparent"
-                     BorderThickness="0"
-                     Foreground="#E6FFFFFF"
-                     ItemContainerStyle="{StaticResource DarkListBoxItem}"
-                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                <ListBox.ItemTemplate>
-                    <DataTemplate>
-                        <StackPanel Orientation="Horizontal" Margin="2">
-                            <CheckBox Style="{StaticResource DarkCheckBox}"
-                                      IsChecked="{Binding IsSelected}"
-                                      VerticalAlignment="Center"/>
-                            <Image Source="{Binding IconImage}" Width="22" Height="22" Margin="9,0,0,0"/>
-                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center" Margin="8,0,0,0"
-                                       Foreground="#E6FFFFFF"/>
-                            <TextBlock Text="{Binding Group}" Foreground="#80FFFFFF"
-                                       FontSize="11" VerticalAlignment="Center" Margin="10,0,0,0"/>
-                        </StackPanel>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
-        </Border>
+        <StackPanel Margin="16,10,16,16">
+            <!-- 自绘标题栏：左标题、右关闭键，按住可拖动窗口 -->
+            <Grid x:Name="HeaderBar" Background="Transparent" Margin="0,0,0,10"
+                  MouseLeftButtonDown="HeaderBar_MouseLeftButtonDown">
+                <TextBlock Text="批量移除" FontSize="14" FontWeight="SemiBold"
+                           Foreground="#F2FFFFFF" VerticalAlignment="Center"/>
+                <Button x:Name="TitleClose" Style="{StaticResource TitleCloseButton}"
+                        HorizontalAlignment="Right" VerticalAlignment="Center"
+                        Click="Cancel_Click" ToolTip="关闭（Esc）"/>
+            </Grid>
 
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
-            <Button Content="移除选中" Style="{StaticResource DarkButton}" Margin="0,0,8,0" Click="Remove_Click"/>
-            <Button Content="取消" Style="{StaticResource DarkButton}" Click="Cancel_Click"/>
+            <TextBlock Text="勾选要移除的图标（Dock 与文件夹均可）"
+                       Foreground="#B3FFFFFF" FontSize="12" Margin="0,0,0,10"/>
+
+            <Border Background="#14FFFFFF" BorderBrush="#33FFFFFF" BorderThickness="1" CornerRadius="10">
+                <ListBox x:Name="ItemList"
+                         MinWidth="320" MaxHeight="340"
+                         Margin="4" Padding="2,2,2,2"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         Foreground="#E6FFFFFF"
+                         ItemContainerStyle="{StaticResource DarkListBoxItem}"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Orientation="Horizontal" Margin="2">
+                                <CheckBox Style="{StaticResource DarkCheckBox}"
+                                          IsChecked="{Binding IsSelected}"
+                                          VerticalAlignment="Center"/>
+                                <Image Source="{Binding IconImage}" Width="22" Height="22" Margin="9,0,0,0"/>
+                                <TextBlock Text="{Binding Name}" VerticalAlignment="Center" Margin="8,0,0,0"
+                                           Foreground="#E6FFFFFF"/>
+                                <TextBlock Text="{Binding Group}" Foreground="#80FFFFFF"
+                                           FontSize="11" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Border>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+                <Button Content="移除选中" Style="{StaticResource DarkButton}" Margin="0,0,8,0" Click="Remove_Click"/>
+                <Button Content="取消" Style="{StaticResource DarkButton}" Click="Cancel_Click"/>
+            </StackPanel>
         </StackPanel>
-    </StackPanel>
+    </Border>
 </Window>
