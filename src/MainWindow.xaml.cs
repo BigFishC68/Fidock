@@ -374,6 +374,8 @@ public partial class MainWindow : Window
     {
         public List<DockApp>? Apps { get; set; }
         public List<DockApp>? FolderApps { get; set; }
+        /// <summary>图标边长（DIP）。缺省 32，兼容没有这个字段的旧配置。</summary>
+        public int? IconSize { get; set; }
     }
 
     private void LoadApps()
@@ -388,6 +390,8 @@ public partial class MainWindow : Window
                 if (cfg != null)
                 {
                     loaded = true;
+                    // 图标大小先于布局生效，避免先按默认尺寸排一遍再跳
+                    if (cfg.IconSize is int iconSize) DockMetrics.Current.IconSize = iconSize;
                     // 加载时跨两栏去重，兼容历史配置里可能存在的重复项
                     var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     foreach (var a in cfg.Apps ?? new List<DockApp>())
@@ -445,7 +449,8 @@ public partial class MainWindow : Window
             var cfg = new DockConfig
             {
                 Apps = Apps.ToList(),
-                FolderApps = FolderApps.ToList()
+                FolderApps = FolderApps.ToList(),
+                IconSize = (int)Math.Round(DockMetrics.Current.IconSize)
             };
             File.WriteAllText(ConfigFile,
                 JsonSerializer.Serialize(cfg, new JsonSerializerOptions { WriteIndented = true }));
@@ -1498,9 +1503,7 @@ public partial class MainWindow : Window
         return index;
     }
 
-    private static bool IsExecutable(string path)
-        => path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ||
-           path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase);
+    private static bool IsExecutable(string path) => AppPaths.IsLaunchable(path);
 
     // ---------- 文件夹上拉面板 ----------
     private void ToggleFolderPopup(Button? folderButton)
@@ -1832,6 +1835,33 @@ public partial class MainWindow : Window
             Process.Start(new ProcessStartInfo { FileName = _configDirectory, UseShellExecute = true });
         }
         catch { }
+    }
+
+    // ---------- 图标大小 ----------
+    /// <summary>应用图标尺寸：写配置 + 重新居中（栏宽变了，位置要重算）。</summary>
+    public void ApplyIconSize(double size)
+    {
+        DockMetrics.Current.IconSize = size;
+        SaveApps();
+        ScheduleRecenter();
+        SyncIconSizeMenu();
+    }
+
+    private void IconSize_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: string tag } && double.TryParse(tag, out double size))
+            ApplyIconSize(size);
+    }
+
+    private void DockArea_ContextMenuOpening(object sender, ContextMenuEventArgs e) => SyncIconSizeMenu();
+
+    /// <summary>三个档位是互斥勾选，打开菜单时按当前值刷新。</summary>
+    private void SyncIconSizeMenu()
+    {
+        double cur = DockMetrics.Current.IconSize;
+        IconSizeSmall.IsChecked = Math.Abs(cur - 32) < 0.5;
+        IconSizeMid.IsChecked = Math.Abs(cur - 40) < 0.5;
+        IconSizeLarge.IsChecked = Math.Abs(cur - 48) < 0.5;
     }
 
     private void BatchRemove_Click(object sender, RoutedEventArgs e)

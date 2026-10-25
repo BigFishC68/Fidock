@@ -105,66 +105,34 @@
         <ContextMenu x:Key="DockContextMenu"
                      Style="{StaticResource DarkContextMenu}"
                      DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+            <!-- 图标右键菜单：顺序 移除 → 打开文件位置 → 结束进程（结束进程仅运行时出现） -->
             <ContextMenu.Resources>
                 <Style TargetType="MenuItem" BasedOn="{StaticResource DarkMenuItem}"/>
                 <Style TargetType="Separator" BasedOn="{StaticResource DarkSeparator}"/>
+                <!-- 用户项专用：固定项 / 文件夹 / 占位项不显示这两项 -->
+                <Style x:Key="UserIconMenuItem" TargetType="MenuItem" BasedOn="{StaticResource DarkMenuItem}">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsFixed}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding IsFolder}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding IsPlaceholder}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
             </ContextMenu.Resources>
-            <!-- 结束进程：程序运行时才显示（资源管理器与任务栏同进程名，禁用） -->
+            <MenuItem Header="移除" Style="{StaticResource UserIconMenuItem}" Click="RemoveApp_Click"/>
+            <MenuItem Header="打开文件位置" Style="{StaticResource UserIconMenuItem}" Click="OpenLocation_Click"/>
             <MenuItem Tag="win-kill" Header="结束进程" Visibility="Collapsed"
                       Click="KillProcessMenuItem_Click"/>
-            <MenuItem Header="打开文件位置" Click="OpenLocation_Click">
-                <MenuItem.Style>
-                    <Style TargetType="MenuItem" BasedOn="{StaticResource DarkMenuItem}">
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding IsFixed}" Value="True">
-                                <Setter Property="Visibility" Value="Collapsed"/>
-                            </DataTrigger>
-                            <DataTrigger Binding="{Binding IsFolder}" Value="True">
-                                <Setter Property="Visibility" Value="Collapsed"/>
-                            </DataTrigger>
-                            <DataTrigger Binding="{Binding IsPlaceholder}" Value="True">
-                                <Setter Property="Visibility" Value="Collapsed"/>
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </MenuItem.Style>
-            </MenuItem>
-            <Separator>
-                <Separator.Style>
-                    <Style TargetType="Separator" BasedOn="{StaticResource DarkSeparator}">
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding IsFolder}" Value="True">
-                                <Setter Property="Visibility" Value="Collapsed"/>
-                            </DataTrigger>
-                            <DataTrigger Binding="{Binding IsFixed}" Value="True">
-                                <Setter Property="Visibility" Value="Collapsed"/>
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </Separator.Style>
-            </Separator>
-            <MenuItem Header="移除" Click="RemoveApp_Click">
-                <MenuItem.Style>
-                    <Style TargetType="MenuItem" BasedOn="{StaticResource DarkMenuItem}">
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding IsFixed}" Value="True">
-                                <Setter Property="Visibility" Value="Collapsed"/>
-                            </DataTrigger>
-                            <DataTrigger Binding="{Binding IsFolder}" Value="True">
-                                <Setter Property="Visibility" Value="Collapsed"/>
-                            </DataTrigger>
-                            <DataTrigger Binding="{Binding IsPlaceholder}" Value="True">
-                                <Setter Property="Visibility" Value="Collapsed"/>
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </MenuItem.Style>
-            </MenuItem>
         </ContextMenu>
 
         <Style x:Key="DockIcon" TargetType="Button">
-            <Setter Property="Width" Value="40"/>
-            <Setter Property="Height" Value="40"/>
+            <Setter Property="Width" Value="{Binding Source={x:Static local:DockMetrics.Current}, Path=ButtonSize}"/>
+            <Setter Property="Height" Value="{Binding Source={x:Static local:DockMetrics.Current}, Path=ButtonSize}"/>
             <Setter Property="Margin" Value="3,0"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
@@ -295,9 +263,11 @@
                     PreviewMouseUp="Icon_PreviewMouseUp"
                     DragOver="Icon_DragOver"
                     Drop="Icon_Drop">
-                <Grid Width="32" Height="32">
+                <Grid Width="{Binding Source={x:Static local:DockMetrics.Current}, Path=IconSize}"
+                      Height="{Binding Source={x:Static local:DockMetrics.Current}, Path=IconSize}">
                     <Image Source="{Binding IconImage}"
-                           Width="32" Height="32"
+                           Width="{Binding Source={x:Static local:DockMetrics.Current}, Path=IconSize}"
+                           Height="{Binding Source={x:Static local:DockMetrics.Current}, Path=IconSize}"
                            Stretch="Uniform"
                            RenderOptions.BitmapScalingMode="HighQuality"/>
 
@@ -329,6 +299,7 @@
                 CornerRadius="16"
                 Padding="10,6"
                 AllowDrop="True"
+                ContextMenuOpening="DockArea_ContextMenuOpening"
                 DragOver="DockArea_DragOver"
                 Drop="DockArea_Drop">
             <Border.ContextMenu>
@@ -345,6 +316,14 @@
                     <Separator/>
                     <MenuItem Header="添加程序…" Click="AddApps_Click"/>
                     <MenuItem Header="批量移除" Click="BatchRemove_Click"/>
+                    <MenuItem Header="图标大小">
+                        <MenuItem x:Name="IconSizeSmall" Header="标准（32）" IsCheckable="True"
+                                  Tag="32" Click="IconSize_Click"/>
+                        <MenuItem x:Name="IconSizeMid" Header="较大（40）" IsCheckable="True"
+                                  Tag="40" Click="IconSize_Click"/>
+                        <MenuItem x:Name="IconSizeLarge" Header="特大（48）" IsCheckable="True"
+                                  Tag="48" Click="IconSize_Click"/>
+                    </MenuItem>
                     <MenuItem Header="打开配置文件夹" Click="OpenConfigFolder_Click"/>
                     <Separator/>
                     <MenuItem Header="退出" Click="Close_Click"/>
@@ -358,7 +337,8 @@
                 <ContentControl x:Name="FolderButtonHost"
                                 Content="{Binding FolderApp}"
                                 ContentTemplate="{StaticResource DockItemTemplate}"/>
-                <Rectangle x:Name="FolderSep" Width="1" Height="26" Margin="6,0"/>
+                <Rectangle x:Name="FolderSep" Width="1" Margin="6,0"
+                           Height="{Binding Source={x:Static local:DockMetrics.Current}, Path=SeparatorHeight}"/>
                 <ItemsControl x:Name="AppItems"
                               ItemsSource="{Binding Apps}"
                               ItemTemplate="{StaticResource DockItemTemplate}">
@@ -368,7 +348,8 @@
                         </ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
                 </ItemsControl>
-                <Rectangle x:Name="RecycleSep" Width="1" Height="26" Margin="6,0"/>
+                <Rectangle x:Name="RecycleSep" Width="1" Margin="6,0"
+                           Height="{Binding Source={x:Static local:DockMetrics.Current}, Path=SeparatorHeight}"/>
                 <!-- 运行中的文件夹项：临时显示在回收站左侧，关闭后回到文件夹面板 -->
                 <ItemsControl x:Name="RunningFolderItems"
                               ItemsSource="{Binding RunningFolderView}"
