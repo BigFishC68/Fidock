@@ -1548,12 +1548,14 @@ public partial class MainWindow : Window
 
     // 共享右键菜单中的动态项（资源字典里的 x:Name 不生成字段，按 Tag 解析一次缓存）
     private MenuItem? _killProcessMenuItem;
+    private MenuItem? _runAsAdminMenuItem;
 
     private bool EnsureMenuParts(ContextMenu menu)
     {
-        if (_killProcessMenuItem != null) return true;
-        _killProcessMenuItem = FindMenuPart<MenuItem>(menu, "win-kill");
-        return _killProcessMenuItem != null;
+        if (_killProcessMenuItem != null && _runAsAdminMenuItem != null) return true;
+        _killProcessMenuItem ??= FindMenuPart<MenuItem>(menu, "win-kill");
+        _runAsAdminMenuItem ??= FindMenuPart<MenuItem>(menu, "win-admin");
+        return _killProcessMenuItem != null && _runAsAdminMenuItem != null;
     }
 
     private static T? FindMenuPart<T>(ItemsControl parent, object tag) where T : FrameworkElement
@@ -1583,10 +1585,40 @@ public partial class MainWindow : Window
 
     private void PopulateIconMenu(DockApp app)
     {
-        if (_killProcessMenuItem == null) return;
+        if (_killProcessMenuItem == null || _runAsAdminMenuItem == null) return;
+
+        // 快速访问（目录）、回收站等 shell 项没有可提权的目标
+        bool elevatable = !app.IsQuickAccess &&
+                          !app.Path.StartsWith("::", StringComparison.OrdinalIgnoreCase) &&
+                          AppPaths.IsElevatable(app.Path);
+        _runAsAdminMenuItem.Visibility = elevatable ? Visibility.Visible : Visibility.Collapsed;
+
         bool canKill = (EnumAppWindows(app).Count > 0 || app.IsRunning) &&
             !string.Equals(app.RunningKey, "explorer", StringComparison.OrdinalIgnoreCase);
         _killProcessMenuItem.Visibility = canKill ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    // 以管理员身份运行：走 shell 的 runas 动词，由系统弹 UAC 授权
+    private void RunAsAdmin_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { DataContext: DockApp app }) return;
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = LaunchPath(app),
+                UseShellExecute = true,
+                Verb = "runas"
+            });
+            BeginStarting(app);
+            RefreshRunningSoon();
+        }
+        catch (Exception ex)
+        {
+            // 用户在 UAC 对话框点了"否"（ERROR_CANCELLED 1223）：不算启动失败，不打扰
+            if (ex is System.ComponentModel.Win32Exception { NativeErrorCode: 1223 }) return;
+            ShowLaunchError(app, ex);
+        }
     }
 
     private void KillProcessMenuItem_Click(object sender, RoutedEventArgs e)

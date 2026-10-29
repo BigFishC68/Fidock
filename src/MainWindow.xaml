@@ -105,7 +105,7 @@
         <ContextMenu x:Key="DockContextMenu"
                      Style="{StaticResource DarkContextMenu}"
                      DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-            <!-- 图标右键菜单：顺序 移除 → 打开文件位置 → 结束进程（结束进程仅运行时出现） -->
+            <!-- 图标右键菜单：顺序 移除 → 打开文件位置 → 以管理员身份运行 → 结束进程（后两项按状态出现） -->
             <ContextMenu.Resources>
                 <Style TargetType="MenuItem" BasedOn="{StaticResource DarkMenuItem}"/>
                 <Style TargetType="Separator" BasedOn="{StaticResource DarkSeparator}"/>
@@ -126,6 +126,8 @@
             </ContextMenu.Resources>
             <MenuItem Header="移除" Style="{StaticResource UserIconMenuItem}" Click="RemoveApp_Click"/>
             <MenuItem Header="打开文件位置" Style="{StaticResource UserIconMenuItem}" Click="OpenLocation_Click"/>
+            <MenuItem Tag="win-admin" Header="以管理员身份运行" Visibility="Collapsed"
+                      Click="RunAsAdmin_Click"/>
             <MenuItem Tag="win-kill" Header="结束进程" Visibility="Collapsed"
                       Click="KillProcessMenuItem_Click"/>
         </ContextMenu>

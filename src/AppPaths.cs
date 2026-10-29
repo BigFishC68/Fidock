@@ -14,10 +14,22 @@ public static class AppPaths
         ".exe", ".lnk", ".url", ".bat", ".cmd"
     };
 
+    // 能以管理员身份跑的只有真正的可执行目标：.url 是浏览器地址，提权无意义
+    private static readonly string[] ElevatableExtensions =
+    {
+        ".exe", ".lnk", ".bat", ".cmd"
+    };
+
     public static bool IsLaunchable(string? path)
+        => HasAnyExtension(path, LaunchableExtensions);
+
+    public static bool IsElevatable(string? path)
+        => HasAnyExtension(path, ElevatableExtensions);
+
+    private static bool HasAnyExtension(string? path, string[] extensions)
     {
         if (string.IsNullOrWhiteSpace(path)) return false;
-        foreach (var ext in LaunchableExtensions)
+        foreach (var ext in extensions)
             if (path.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) return true;
         return false;
     }
