@@ -87,17 +87,26 @@ public partial class MainWindow
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
+    // 异步版本：不等待目标线程处理消息，目标卡住时不会把调用方一起拖住
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
     [DllImport("user32.dll")]
     private static extern bool IsIconic(IntPtr hWnd);
 
     [DllImport("user32.dll")]
     private static extern bool IsWindow(IntPtr hWnd);
 
+    // 目标窗口 5 秒内没有响应消息（"未响应"）时返回 true
     [DllImport("user32.dll")]
-    private static extern IntPtr GetForegroundWindow();
+    private static extern bool IsHungAppWindow(IntPtr hWnd);
+
+    // 前台权限不足时的退路：Alt+Tab 用的就是它，不需要共享输入队列
+    [DllImport("user32.dll")]
+    private static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab);
 
     [DllImport("user32.dll")]
-    private static extern bool BringWindowToTop(IntPtr hWnd);
+    private static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
     private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);

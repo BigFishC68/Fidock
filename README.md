@@ -72,6 +72,21 @@ Stop-Process -Name MyDock -Force
 
 轮询开销（同一进程内实测 5 次取平均）：分配 1266 KB/次 → 60 KB/次，耗时 81 ms → 6 ms。
 
+### 空闲回收（按工作集计的实际占用）
+
+私有提交量是 .NET + WPF 的基线（约 105 MB，与发布形态无关），任务管理器"内存"列看到的是工作集。
+程序在**用户 20 秒没动键鼠、且没有弹层/拖拽**时做一次整堆回收并把工作集换出（`src/Interop/MemoryTrim.cs`），
+页面进 standby，再次操作时按需换回。实测启动 4 秒 151.5 MB → 8 秒后 15.5 MB，空闲稳定在 15~20 MB；
+操作界面后按需回升，不影响交互。
+
+### 稳定性（不再拖死资源管理器）
+
+- 前台激活顺序：`SetForegroundWindow` → `SwitchToThisWindow` → `AttachThreadInput` 兜底，但**只对非外壳、未挂起的窗口**兜底。
+  对 `explorer.exe` 一律不接管输入队列——附加输入队列会让本进程与该线程互相拖住，是"点 Dock 把文件管理器卡死/留下关不掉的残窗"的来源。
+- 目标窗口 `IsHungAppWindow` 为真时，一律不发 `ShowWindow`/置前，也不重复启动。
+- 启动、以管理员运行、拖文件进回收站都改到后台线程：`ShellExecuteEx` 会同步等 shell（含 UAC 授权）返回，放在 UI 线程上就是整个 Dock 冻住。
+- 关闭/结束进程只对真正的文件窗口（`CabinetWClass`/`ExploreWClass`）生效，绝不对任务栏、桌面、各种浮窗发 `WM_CLOSE` 或结束 `explorer.exe`。
+
 ## 使用
 
 | 操作 | 行为 |

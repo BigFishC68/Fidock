@@ -9,6 +9,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -73,6 +74,10 @@ public partial class MainWindow : Window
     // 前台窗口轮询：维护“最近一个非本进程的前台窗口”（点击 Dock 时 Dock 自身成前台，需还原点击前的顶层程序）
     private readonly DispatcherTimer _foregroundTimer = new() { Interval = TimeSpan.FromMilliseconds(300) };
 
+    // 空闲内存回收：用户离开键鼠一段时间后把工作集还给系统（见 MemoryTrim）
+    private readonly DispatcherTimer _trimTimer = new() { Interval = TimeSpan.FromSeconds(30) };
+    private long _lastTrimTick;
+
     private const int SM_CXDRAG = 36;
     private const int SM_CYDRAG = 37;
 
@@ -134,6 +139,13 @@ public partial class MainWindow : Window
         _runningTimer.Start();
         UpdateRunningStates();
 
+        // 启动后 8 秒先回收一次（图标、菜单模板都建完了），之后交给空闲判定
+        _trimTimer.Tick += (_, _) => TryTrimMemory(force: false);
+        _trimTimer.Start();
+        var firstTrim = new DispatcherTimer { Interval = TimeSpan.FromSeconds(8) };
+        firstTrim.Tick += (_, _) => { firstTrim.Stop(); TryTrimMemory(force: true); };
+        firstTrim.Start();
+
 #if DEBUG
         MaybeRunSelfTest();
 #endif
@@ -146,6 +158,7 @@ public partial class MainWindow : Window
         // 两个轮询定时器都要停：窗口已销毁，继续 Tick 只会访问失效的视觉树
         _foregroundTimer.Stop();
         _runningTimer.Stop();
+        _trimTimer.Stop();
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
     }
@@ -166,6 +179,24 @@ public partial class MainWindow : Window
             MaxWidth = SystemParameters.WorkArea.Width * 0.95;
             Recenter();
         }));
+    }
+
+    /// <summary>
+    /// 空闲时回收内存：先做一次整堆回收，再让系统把工作集换出（页面进 standby，用到时自动换回）。
+    /// 触发条件：用户 20 秒没动键鼠、没有弹层 / 拖拽，且距上次回收 ≥ 60 秒。
+    /// </summary>
+    private void TryTrimMemory(bool force)
+    {
+        if (_dragApp != null || _internalDragging) return;
+        if (FolderPopup.IsOpen || WindowListPopup.IsOpen) return;
+        if (!force && MemoryTrim.IdleSeconds() < 20) return;
+
+        long now = Environment.TickCount64;
+        if (_lastTrimTick != 0 && now - _lastTrimTick < 60000) return;
+        _lastTrimTick = now;
+
+        GC.Collect(2, GCCollectionMode.Forced, true, true);
+        MemoryTrim.TrimWorkingSet();
     }
 
     // ---------- 居中（向两侧延伸） ----------
@@ -557,35 +588,62 @@ public partial class MainWindow : Window
 
     private void LaunchApp(DockApp app)
     {
+        // 回收站等 shell CLSID / 快速访问目录：都交给资源管理器
+        if (app.Path.StartsWith("::", StringComparison.OrdinalIgnoreCase))
+        {
+            StartProcessAsync(app, new ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = app.Path,
+                UseShellExecute = true
+            }, track: false);
+            return;
+        }
+
+        if (app.IsQuickAccess)
+        {
+            StartProcessAsync(app, new ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = $"\"{app.Path}\"",
+                UseShellExecute = true
+            }, track: false);
+            return;
+        }
+
+        ProcessStartInfo psi;
         try
         {
-            if (app.Path.StartsWith("::", StringComparison.OrdinalIgnoreCase))
-            {
-                // 回收站等 shell CLSID
-                Process.Start("explorer.exe", app.Path);
-                return;
-            }
-
-            // 快速访问：交给资源管理器打开目录（已有窗口复用），不需要"启动中"灰显
-            if (app.IsQuickAccess)
-            {
-                Process.Start("explorer.exe", $"\"{app.Path}\"");
-                return;
-            }
-
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = LaunchPath(app),
-                UseShellExecute = true
-            });
-            BeginStarting(app);
-            // 刚启动的程序可能只能靠目录兜底识别，立刻刷新（RefreshRunningSoon 会让路径索引失效）
-            RefreshRunningSoon();
+            psi = new ProcessStartInfo { FileName = LaunchPath(app), UseShellExecute = true };
         }
         catch (Exception ex)
         {
             ShowLaunchError(app, ex);
+            return;
         }
+        BeginStarting(app);
+        StartProcessAsync(app, psi, track: true);
+    }
+
+    /// <summary>
+    /// 启动放在线程池：UseShellExecute 会同步等 ShellExecuteEx 返回（要经过 shell），
+    /// 资源管理器一忙就把 Dock 的 UI 线程一起拖住——这正是"点了 Dock 整个栏都僵住"的来源。
+    /// </summary>
+    private void StartProcessAsync(DockApp app, ProcessStartInfo psi, bool track)
+    {
+        Task.Run(() =>
+        {
+            try
+            {
+                using var p = Process.Start(psi);
+            }
+            catch (Exception ex)
+            {
+                Dispatcher.BeginInvoke(new Action(() => ShowLaunchError(app, ex)));
+                return;
+            }
+            if (track) Dispatcher.BeginInvoke(new Action(RefreshRunningSoon));
+        });
     }
 
     // 启动中：图标灰显 + 忽略重复点击，避免"点了没反应又点一次"开出两个实例
@@ -841,13 +899,16 @@ public partial class MainWindow : Window
             IntPtr panel = FindAppMainPanel(app);
             if (panel != IntPtr.Zero)
             {
+                // 目标已"未响应"：任何 ShowWindow / 置前都要等它回消息，只会把 Dock 一起卡住，
+                // 也不重复启动（那会多开一个实例）
+                if (IsHungAppWindow(panel)) return;
                 if (FolderPopup.IsOpen && FolderApps.Contains(app)) FolderPopup.IsOpen = false;
 
                 // 已完整在屏且就是顶层 → 与任务栏一致：再按一次是最小化
                 if (IsWindowVisible(panel) && !IsIconic(panel) && !WindowReveal.IsSlidOut(panel) &&
                     (panel == GetForegroundWindow() || panel == _lastForegroundHwnd))
                 {
-                    ShowWindow(panel, SW_MINIMIZE);
+                    ShowWindowAsync(panel, SW_MINIMIZE);
                     return;
                 }
 
@@ -871,7 +932,11 @@ public partial class MainWindow : Window
             var toMin = windows.Where(w => !IsIconic(w.HWnd)).Select(w => w.HWnd).ToList();
             if (_lastForegroundHwnd != IntPtr.Zero && !IsIconic(_lastForegroundHwnd) && appPids.Contains((int)lastFgPid) && !toMin.Contains(_lastForegroundHwnd))
                 toMin.Add(_lastForegroundHwnd);
-            foreach (var h in toMin) ShowWindow(h, SW_MINIMIZE);
+            foreach (var h in toMin)
+            {
+                if (IsHungAppWindow(h)) continue;   // 挂起的窗口不碰
+                ShowWindowAsync(h, SW_MINIMIZE);
+            }
             return;
         }
 
@@ -1015,32 +1080,35 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 可靠地把窗口带到前台（最小化先还原）。
-    /// SetForegroundWindow 受前台进程限制，借 AttachThreadInput 临时共享输入队列突破。
+    /// 顺序：SetForegroundWindow（Dock 刚被点击时本进程即前台，通常一次就成）
+    ///       → SwitchToThisWindow（Alt+Tab 同一套机制）
+    ///       → AttachThreadInput 兜底（仅对非外壳、未挂起的窗口）。
+    /// 为什么禁止对 explorer 用 AttachThreadInput：它把本线程与目标线程的输入队列绑在一起，
+    /// 资源管理器 UI 线程一忙，两边会一起僵住，还会留下关不掉的残窗——用户遇到的"点 Dock 把
+    /// 文件管理器卡死"就是这条路径。挂起的窗口同理，一律不碰。
     /// </summary>
     private static void ForceForegroundWindow(IntPtr hWnd)
     {
         if (hWnd == IntPtr.Zero || !IsWindow(hWnd)) return;
+        if (IsHungAppWindow(hWnd)) return;
         try
         {
-            if (IsIconic(hWnd)) ShowWindow(hWnd, SW_RESTORE);
+            if (IsIconic(hWnd)) ShowWindowAsync(hWnd, SW_RESTORE);
+            if (SetForegroundWindow(hWnd)) return;
+            SwitchToThisWindow(hWnd, true);
+            if (GetForegroundWindow() == hWnd) return;
+
+            GetWindowThreadProcessId(hWnd, out uint pid);
+            if (IsShellProcess((int)pid)) return;   // 外壳进程绝不接管输入队列
 
             IntPtr fore = GetForegroundWindow();
             uint foreThread = GetWindowThreadProcessId(fore, out _);
             uint myThread = GetCurrentThreadId();
-            // 把前台线程附加到当前线程：共享其输入队列即继承前台资格，
-            // 突破 SetForegroundWindow 的前台进程限制（方向不能反）
-            if (foreThread != myThread && foreThread != 0)
-            {
-                AttachThreadInput(foreThread, myThread, true);
-                SetForegroundWindow(hWnd);
-                BringWindowToTop(hWnd);
-                AttachThreadInput(foreThread, myThread, false);
-            }
-            else
-            {
-                SetForegroundWindow(hWnd);
-                BringWindowToTop(hWnd);
-            }
+            if (foreThread == 0 || foreThread == myThread) return;
+
+            AttachThreadInput(foreThread, myThread, true);
+            try { SetForegroundWindow(hWnd); }
+            finally { AttachThreadInput(foreThread, myThread, false); }
         }
         catch { }
     }
@@ -1161,7 +1229,28 @@ public partial class MainWindow : Window
     // explorer.exe 还拥有 Network Flyout、音量浮窗等带标题的可见浮窗（ATL 类），
     // 只有 CabinetWClass / ExploreWClass 才是真正的文件窗口
     private static bool IsExplorerFileWindow(string cls)
-        => cls == "CabinetWClass" || cls == "ExploreWClass";
+        => cls is "CabinetWClass" or "ExploreWClass";
+
+    // 窗口枚举复用缓冲区：一次枚举要读几百个窗口，逐个 new StringBuilder 会白造几百 KB 垃圾。
+    // 只在 UI 线程的 EnumWindows 回调里同步使用，不存在并发。
+    private static readonly StringBuilder ClassBuffer = new(256);
+    private static readonly StringBuilder TitleBuffer = new(512);
+
+    private static string ReadClassName(IntPtr hWnd)
+    {
+        ClassBuffer.Clear();
+        GetClassName(hWnd, ClassBuffer, ClassBuffer.Capacity);
+        return ClassBuffer.ToString();
+    }
+
+    private static string ReadWindowTitle(IntPtr hWnd)
+    {
+        int len = GetWindowTextLength(hWnd);
+        if (len <= 0) return "";
+        TitleBuffer.Clear();
+        int n = GetWindowText(hWnd, TitleBuffer, TitleBuffer.Capacity);
+        return n <= 0 ? "" : TitleBuffer.ToString(0, n).Trim();
+    }
 
     /// <summary>
     /// 枚举指定程序当前打开的顶层窗口（排除桌面 / 任务栏 / 附属窗 / 工具窗 / 无标题窗）。
@@ -1186,20 +1275,15 @@ public partial class MainWindow : Window
                 GetWindowThreadProcessId(hWnd, out uint pid);
                 if (!pids.Contains((int)pid)) return true;
 
-                var cls = new StringBuilder(256);
-                GetClassName(hWnd, cls, cls.Capacity);
-                if (cls.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd")
+                string clsStr = ReadClassName(hWnd);
+                if (clsStr is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd")
                     return true;                                                        // 桌面 / 任务栏
                 // 资源管理器只管理真正的文件窗口类，排除其拥有的 Network Flyout / 音量浮窗 等浮窗
                 if (string.Equals(app.RunningKey, "explorer", StringComparison.OrdinalIgnoreCase)
-                    && !IsExplorerFileWindow(cls.ToString()))
+                    && !IsExplorerFileWindow(clsStr))
                     return true;
 
-                int len = GetWindowTextLength(hWnd);
-                if (len <= 0) return true;
-                var sb = new StringBuilder(len + 1);
-                GetWindowText(hWnd, sb, sb.Capacity);
-                string title = sb.ToString().Trim();
+                string title = ReadWindowTitle(hWnd);
                 if (title.Length == 0) return true;
 
                 list.Add(new AppWindow { HWnd = hWnd, Title = Truncate(title, 48) });
@@ -1291,9 +1375,7 @@ public partial class MainWindow : Window
                 GetWindowThreadProcessId(hWnd, out uint pid);
                 if (!pids.Contains((int)pid)) return true;
 
-                var cls = new StringBuilder(256);
-                GetClassName(hWnd, cls, cls.Capacity);
-                string clsStr = cls.ToString();
+                string clsStr = ReadClassName(hWnd);
                 if (clsStr is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") return true;
                 if (string.Equals(app.RunningKey, "explorer", StringComparison.OrdinalIgnoreCase)
                     && !IsExplorerFileWindow(clsStr)) return true;
@@ -1322,7 +1404,14 @@ public partial class MainWindow : Window
         {
             var cls = new StringBuilder(256);
             GetClassName(hWnd, cls, cls.Capacity);
-            if (cls.ToString() == "Windows.UI.Core.CoreWindow")
+            string clsStr = cls.ToString();
+            GetWindowThreadProcessId(hWnd, out uint pid);
+
+            // explorer.exe 名下除了文件夹窗口，还有任务栏 / 桌面 / 各种浮窗。
+            // 对它们发 WM_CLOSE 会让整个外壳重启（事件日志里的"外壳程序意外停止"），只放行文件窗口。
+            if (IsShellProcess((int)pid) && !IsExplorerFileWindow(clsStr)) return;
+
+            if (clsStr == "Windows.UI.Core.CoreWindow")
             {
                 KillWindowProcess(hWnd);
                 return;
@@ -1337,10 +1426,22 @@ public partial class MainWindow : Window
         try
         {
             GetWindowThreadProcessId(hWnd, out uint pid);
+            if (IsShellProcess((int)pid)) return;   // 杀 explorer = 重启整个桌面
             using var p = Process.GetProcessById((int)pid);
             p.Kill();
         }
         catch { }
+    }
+
+    /// <summary>该 pid 是否是 Windows 外壳进程（explorer.exe）。</summary>
+    private static bool IsShellProcess(int pid)
+    {
+        try
+        {
+            using var p = Process.GetProcessById(pid);
+            return string.Equals(p.ProcessName, "explorer", StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
     }
 
     /// <summary>结束程序的所有进程（强制）。资源管理器与任务栏同进程名，禁用。</summary>
@@ -1484,11 +1585,26 @@ public partial class MainWindow : Window
             return;
         }
 
-        foreach (var f in files)
+        // 移入回收站（SHFileOperation）会同步等文件操作完成，大文件/网络盘上能卡住好几秒，
+        // 放到独立的 STA 线程，Dock 不跟着僵
+        if (owner.IsRecycleBin)
         {
-            if (owner.IsRecycleBin) MoveToRecycleBin(f);
-            else OpenWithApp(owner, f);
+            var list = files.ToArray();
+            RunOnStaThread(() => { foreach (var f in list) MoveToRecycleBin(f); });
+            return;
         }
+
+        foreach (var f in files) OpenWithApp(owner, f);
+    }
+
+    private static void RunOnStaThread(Action action)
+    {
+        var t = new System.Threading.Thread(() => { try { action(); } catch { } })
+        {
+            IsBackground = true
+        };
+        t.SetApartmentState(System.Threading.ApartmentState.STA);
+        t.Start();
     }
 
     private void OpenWithApp(DockApp app, string file)
@@ -1598,27 +1714,47 @@ public partial class MainWindow : Window
         _killProcessMenuItem.Visibility = canKill ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    // 以管理员身份运行：走 shell 的 runas 动词，由系统弹 UAC 授权
+    // 以管理员身份运行：走 shell 的 runas 动词，由系统弹 UAC 授权。
+    // 同样必须放到后台：ShellExecuteEx 会一直等 UAC 对话框出结果，放在 UI 线程上就是"点了菜单整个 Dock 冻住"。
     private void RunAsAdmin_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { DataContext: DockApp app }) return;
+        ProcessStartInfo psi;
         try
         {
-            Process.Start(new ProcessStartInfo
+            psi = new ProcessStartInfo
             {
                 FileName = LaunchPath(app),
                 UseShellExecute = true,
                 Verb = "runas"
-            });
-            BeginStarting(app);
-            RefreshRunningSoon();
+            };
         }
         catch (Exception ex)
         {
-            // 用户在 UAC 对话框点了"否"（ERROR_CANCELLED 1223）：不算启动失败，不打扰
-            if (ex is System.ComponentModel.Win32Exception { NativeErrorCode: 1223 }) return;
             ShowLaunchError(app, ex);
+            return;
         }
+
+        BeginStarting(app);
+        Task.Run(() =>
+        {
+            try
+            {
+                using var p = Process.Start(psi);
+            }
+            catch (Exception ex)
+            {
+                // 用户在 UAC 点了"否"（ERROR_CANCELLED 1223）：不算启动失败，不打扰
+                if (ex is Win32Exception { NativeErrorCode: 1223 })
+                {
+                    Dispatcher.BeginInvoke(new Action(() => app.IsStarting = false));
+                    return;
+                }
+                Dispatcher.BeginInvoke(new Action(() => ShowLaunchError(app, ex)));
+                return;
+            }
+            Dispatcher.BeginInvoke(new Action(RefreshRunningSoon));
+        });
     }
 
     private void KillProcessMenuItem_Click(object sender, RoutedEventArgs e)
